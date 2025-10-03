@@ -1,8 +1,0 @@
-{
-  "projects": [
-    {
-      "src": "apps/web",
-      "use": "@vercel/next"
-    }
-  ]
-}
