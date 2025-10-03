@@ -1,4 +1,4 @@
-const API_BASE = "";
+const API_BASE = "https://easy-weather-three.vercel.app";
 
 
 async function fetchForecast(city) {
