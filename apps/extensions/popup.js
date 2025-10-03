@@ -1,4 +1,4 @@
-const BASE = "http://localhost:3000"; // change to your deployed URL later
+const API_BASE = "https://easy-weather-three.vercel.app";
 const q = document.getElementById("q");
 const go = document.getElementById("go");
 const me = document.getElementById("me");
