@@ -449,7 +449,6 @@ export default function WeatherGodPage() {
               <Image
                 src="/logo.png"
                 alt="Easy Weather Logo"
-                width={120}
                 height={38}
                 priority
               />
