@@ -16,7 +16,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["geolocation"],
+  "permissions": [],
   "host_permissions": [
     "https://easy-weather-three.vercel.app/*"
   ],
