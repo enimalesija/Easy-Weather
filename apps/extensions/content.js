@@ -1,6 +1,6 @@
 // apps/extension/content.js
 
-const API_BASE = "http://localhost:3000";
+const API_BASE = "https://easy-weather-three.vercel.app";
 const LS_KEY = "wg:lastCity";
 
 async function getWeather(city = "Stockholm") {
