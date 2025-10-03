@@ -1,0 +1,145 @@
+/* ========== Easy Weather — Pure CSS (PWA) ========== */
+:root {
+  --bg-a: #0b1220;
+  --white-10: rgba(255,255,255,.10);
+  --white-15: rgba(255,255,255,.15);
+  --white-5: rgba(255,255,255,.05);
+  --white-70: rgba(255,255,255,.70);
+  --text: #ffffff;
+  --muted: #cbd5e1;
+  --border: rgba(255,255,255,.10);
+  --shadow: 0 10px 30px rgba(0,0,0,.35);
+  --accent: #facc15;
+  --link: #cbd5e1;
+  --blue-20: rgba(59,130,246,.20);
+  --blue-bd: rgba(147,197,253,.20);
+  --cyan-20: rgba(34,211,238,.20);
+  --cyan-bd: rgba(165,243,252,.20);
+  --black-20: rgba(0,0,0,.20);
+}
+
+.wg-root { min-height: 100vh; color: var(--text); position: relative; overflow-x: hidden; }
+.wg-root.suppress { contain: paint; }
+
+/* Backgrounds based on conditions */
+.bg-default { background: linear-gradient(135deg, #312e81, #0b1220, #000); }
+.bg-rain    { background: linear-gradient(135deg, #0f172a, #0f172a, #312e81); }
+.bg-warm    { background: linear-gradient(135deg, #92400e, #581c87, #312e81); }
+.bg-cold    { background: linear-gradient(135deg, #0e7490, #0b1220, #312e81); }
+
+/* Aurora effect */
+.wg-aurora {
+  pointer-events: none; position: fixed; top: -10rem; left: 50%; transform: translateX(-50%);
+  width: 120vw; height: 60vh; filter: blur(60px);
+  background-image: linear-gradient(to right, rgba(74,222,128,.2), rgba(168,85,247,.15), rgba(96,165,250,.2));
+  animation: auroraPulse 7s ease-in-out infinite; opacity: .5;
+}
+@keyframes auroraPulse { 0%,100%{opacity:.35} 50%{opacity:.75} }
+
+.wg-shell { display: flex; min-height: 100vh; width: 100%; }
+
+/* Sidebar */
+.wg-sidebar {
+  position: sticky; top: 0; height: 100vh; overflow: hidden;
+  transition: width .3s ease; background: var(--white-5);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border-right: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column;
+}
+.wg-sidebar.open { width: 300px; }
+
+
+.wg-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+
+.wg-side-card { background: var(--white-5); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+.wg-side-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--white-70); margin: 0 0 8px; }
+.wg-side-list { display: flex; flex-direction: column; gap: 8px; }
+.wg-muted { color: var(--white-70); font-size: 13px; margin: 0; }
+
+.wg-chip, .wg-btn {
+  display: inline-flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px;
+  background: var(--white-10); border: 1px solid transparent; transition: background-color .15s, border-color .15s, opacity .15s;
+}
+.wg-btn:hover, .wg-chip:hover { background: var(--white-15); }
+.wg-btn-primary {
+  padding: 12px 18px; border-radius: 10px; background: var(--accent); color:#000; font-weight:700;
+  border:none; transition: filter .15s, transform .02s;
+}
+.wg-btn-primary:hover { filter: brightness(1.05); }
+.wg-btn-primary:active { transform: translateY(1px); }
+.wg-btn-cta {
+  padding: 10px 14px; border-radius: 10px; background: var(--accent); color:#000; font-weight:700;
+  display:inline-flex; align-items:center; gap:8px; border:none;
+}
+
+/* Inputs */
+.wg-input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid transparent; outline: none; color: #000; background: #fff; }
+.wg-input:focus { border-color: #d1d5db; }
+
+/* Main container */
+.wg-container { flex: 1; padding: 24px; }
+@media (min-width: 768px) { .wg-container { padding: 10px; } }
+.wg-container-inner { max-width: 1400px; margin: 0 auto; }
+
+.wg-card { background: var(--white-10); padding: 20px; border-radius: 20px; box-shadow: var(--shadow); backdrop-filter: blur(6px); }
+@media (min-width: 768px) { .wg-card { padding: 28px; } }
+
+/* Metrics */
+.wg-metrics-bar {
+  background: var(--black-20);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  overflow-x: auto;
+}
+.wg-metric-col { display: flex; gap: 10px; align-items: center; min-width: 160px; }
+.wg-metric-col .k { font-size: 12px; opacity: .7; margin: 0; }
+.wg-metric-col .v { font-size: 18px; font-weight: 600; margin: 0; }
+
+/* Alerts */
+.wg-grid-2 { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 768px) { .wg-grid-2 { grid-template-columns: repeat(2, 1fr); } }
+.wg-alert { border-radius: 12px; padding: 12px; display: flex; gap: 12px; align-items: center; }
+.wg-alert-blue { background: var(--blue-20); border: 1px solid var(--blue-bd); }
+.wg-alert-cyan { background: var(--cyan-20); border: 1px solid var(--cyan-bd); }
+
+/* Headings */
+.wg-title { font-size: clamp(24px, 2vw, 32px); font-weight: 800; letter-spacing: -0.01em; text-shadow: 0 2px 10px rgba(0,0,0,.25); margin: 0; }
+.wg-h2 { font-size: clamp(20px, 1.8vw, 28px); font-weight: 800; margin: 0; }
+.wg-h3 { font-size: 18px; font-weight: 600; margin: 0 0 8px; }
+
+/* Suggestion dropdown */
+.wg-suggest { position: absolute; z-index: 20; margin-top: 8px; width: 100%; background: #fff; color: #000; border-radius: 12px; box-shadow: 0 20px 40px rgba(2, 6, 23, .45); overflow: hidden; }
+.wg-suggest-item { width: 100%; text-align: left; padding: 10px 14px; display: flex; align-items: center; gap: 8px; background: transparent; border: none; }
+.wg-suggest-item:hover { background: #f1f5f9; }
+
+/* Forecast block */
+.wg-forecast-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.wg-forecast-right { text-align: right; }
+.wg-forecast-temp { font-size: clamp(34px, 4vw, 48px); font-weight: 800; margin: 0; }
+
+/* Daily outlook */
+.wg-daily-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+@media (min-width: 768px) { .wg-daily-grid { grid-template-columns: repeat(7, 1fr); } }
+.wg-daily-card { background: var(--white-10); padding: 12px; text-align: center; border-radius: 12px; }
+
+/* Footer */
+.wg-footer { opacity: .7; font-size: 12px; margin-top: 24px; display: flex; align-items: center; gap: 8px; }
+
+/* Utilities */
+.wg-space-6 > * + * { margin-top: 16px; }
+.wg-space-8 > * + * { margin-top: 20px; }
+.wg-pulse { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:.6} 50%{opacity:1} }
+.wg-faint { color: var(--link); }
+.icon-4 { width: 1rem; height: 1rem; }
+.icon-5 { width: 1.25rem; height: 1.25rem; }
+.icon-8 { width: 2rem; height: 2rem; }
+
+/* Favorites half height + Recents scroll */
+.wg-favorites { max-height: 45vh; overflow-y: auto; }
+.wg-recents-scroll { max-height: 22vh; overflow-y: auto; }
+
+/* Keep Install button visible */
+.wg-install { position: sticky; bottom: 16px; margin-top: 8px; }

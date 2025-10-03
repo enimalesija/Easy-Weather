@@ -1,0 +1,16 @@
+# dependencies
+node_modules
+pnpm-lock.yaml
+
+# next
+.next
+.out
+.vercel
+
+# env
+.env*
+!.env.example
+
+# misc
+.DS_Store
+dist
