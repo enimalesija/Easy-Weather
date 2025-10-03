@@ -1,4 +1,5 @@
-const API_BASE = "http://localhost:3000"; 
+const API_BASE = "";
+
 
 async function fetchForecast(city) {
   const url = `${API_BASE}/api/forecast?city=${encodeURIComponent(city)}`;
