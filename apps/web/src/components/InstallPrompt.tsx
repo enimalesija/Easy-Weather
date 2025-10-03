@@ -1,16 +1,23 @@
 "use client";
 import { useEffect, useState } from "react";
 
+type InstallPromptEvent = Event & {
+  prompt: () => void;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
 export default function InstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<InstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    window.addEventListener("beforeinstallprompt", (e) => {
+    const onBip = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
+      setDeferredPrompt(e as InstallPromptEvent);
       setVisible(true);
-    });
+    };
+    window.addEventListener("beforeinstallprompt", onBip);
+    return () => window.removeEventListener("beforeinstallprompt", onBip);
   }, []);
 
   if (!visible) return null;
@@ -24,8 +31,8 @@ export default function InstallPrompt() {
           setVisible(false);
           if (deferredPrompt) {
             deferredPrompt.prompt();
-            const choice = await deferredPrompt.userChoice;
-            console.log("User choice:", choice);
+            await deferredPrompt.userChoice;
+            setDeferredPrompt(null);
           }
         }}
       >
