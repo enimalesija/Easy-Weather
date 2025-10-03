@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   LineChart,
@@ -24,16 +24,16 @@ import {
   Wind,
   Droplets,
   ThermometerSun,
-  Download,
   CloudFog,
   Trash2,
+  Download,
 } from "lucide-react";
 import "./style.css";
 
 /* ---------------------------------------
    Hooks & Types
 --------------------------------------- */
-function useDebouncedValue<T>(value: T, delay = 250): T {
+function useDebouncedValue<T>(value: T, delay = 250) {
   const [v, setV] = useState(value);
   useEffect(() => {
     const id = setTimeout(() => setV(value), delay);
@@ -41,7 +41,8 @@ function useDebouncedValue<T>(value: T, delay = 250): T {
   }, [value, delay]);
   return v;
 }
-function useIsClient(): boolean {
+
+function useIsClient() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
   return isClient;
@@ -103,13 +104,13 @@ const LS_KEYS = {
   lastCity: "wg:lastCity",
 } as const;
 
-function cToF(c: number | undefined): number | undefined {
-  if (typeof c !== "number") return undefined;
+function cToF(c: number | undefined) {
+  if (typeof c !== "number") return NaN;
   return Math.round((c * 9) / 5 + 32);
 }
-function formatTemp(n: number | undefined, unit: "C" | "F"): string {
+function formatTemp(n: number | undefined, unit: "C" | "F") {
   if (typeof n !== "number") return "—";
-  const v = unit === "F" ? cToF(n) ?? n : Math.round(n);
+  const v = unit === "F" ? cToF(n) : Math.round(n);
   return `${v}°${unit}`;
 }
 function chooseIconByTemp(temp: number | undefined) {
@@ -145,7 +146,6 @@ export default function WeatherGodPage() {
   const [favorites, setFavorites] = useState<Suggestion[]>([]);
   const [recents, setRecents] = useState<string[]>([]);
 
-  // PWA install
   const [installPrompt, setInstallPrompt] =
     useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -155,7 +155,7 @@ export default function WeatherGodPage() {
       setIsStandalone(
         (window.matchMedia &&
           window.matchMedia("(display-mode: standalone)").matches) ||
-          (navigator as any).standalone === true
+          (window as any).navigator?.standalone === true
       );
     checkStandalone();
 
@@ -181,12 +181,8 @@ export default function WeatherGodPage() {
     try {
       const u = (localStorage.getItem(LS_KEYS.unit) as "C" | "F") || "C";
       const c = localStorage.getItem(LS_KEYS.compact) === "1";
-      const f: Suggestion[] = JSON.parse(
-        localStorage.getItem(LS_KEYS.favorites) || "[]"
-      );
-      const r: string[] = JSON.parse(
-        localStorage.getItem(LS_KEYS.recents) || "[]"
-      );
+      const f = JSON.parse(localStorage.getItem(LS_KEYS.favorites) || "[]");
+      const r = JSON.parse(localStorage.getItem(LS_KEYS.recents) || "[]");
       setUnit(u);
       setCompact(c);
       setFavorites(Array.isArray(f) ? f : []);
@@ -232,14 +228,24 @@ export default function WeatherGodPage() {
         )}&count=8&language=en&format=json`;
         const res = await fetch(url);
         if (!res.ok) throw new Error("Failed fetching suggestions");
-        const data: { results?: Suggestion[] } = await res.json();
+        const data = await res.json();
         if (!active) return;
-        setSuggestions(data.results || []);
+        setSuggestions(
+          (data.results || []).map((r: Record<string, unknown>) => ({
+            id: r.id as number,
+            name: r.name as string,
+            country: r.country as string,
+            admin1: r.admin1 as string,
+            latitude: r.latitude as number,
+            longitude: r.longitude as number,
+            timezone: r.timezone as string,
+          }))
+        );
       } catch (e: unknown) {
         if (!active) return;
+        const msg = e instanceof Error ? e.message : String(e);
         setSuggestions([]);
-        const message = e instanceof Error ? e.message : String(e);
-        setError(message || "Suggestion error");
+        setError(msg);
       }
     })();
     return () => {
@@ -248,34 +254,37 @@ export default function WeatherGodPage() {
   }, [debounced]);
 
   /* API call */
-  async function loadForecastByCityName(city: string) {
-    if (!city) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/forecast?city=${encodeURIComponent(city)}`);
-      const json: Forecast & { error?: string } = await res.json();
-      if (res.ok) {
-        setForecast(json);
-        setRecents((r) => {
-          const n = [
-            city,
-            ...r.filter((x) => x.toLowerCase() !== city.toLowerCase()),
-          ];
-          if (isClient) localStorage.setItem(LS_KEYS.lastCity, city);
-          return n.slice(0, 8);
-        });
-      } else {
-        throw new Error(json?.error || "Failed to fetch forecast");
+  const loadForecastByCityName = useCallback(
+    async (city: string) => {
+      if (!city) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/forecast?city=${encodeURIComponent(city)}`);
+        const json = await res.json();
+        if (res.ok) {
+          setForecast(json);
+          setRecents((r) => {
+            const n = [
+              city,
+              ...r.filter((x) => x.toLowerCase() !== city.toLowerCase()),
+            ];
+            if (isClient) localStorage.setItem(LS_KEYS.lastCity, city);
+            return n.slice(0, 8);
+          });
+        } else {
+          throw new Error((json && json.error) || "Failed to fetch forecast");
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setForecast(null);
+        setError(msg || "Unknown error");
+      } finally {
+        setLoading(false);
       }
-    } catch (e: unknown) {
-      setForecast(null);
-      const message = e instanceof Error ? e.message : String(e);
-      setError(message || "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }
+    },
+    [isClient]
+  );
 
   /* First load */
   useEffect(() => {
@@ -300,17 +309,21 @@ export default function WeatherGodPage() {
               const rev = await fetch(
                 `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${latitude}&longitude=${longitude}&language=en`
               );
-              const rj: { results?: Suggestion[] } = await rev.json();
+              const rj = await rev.json();
 
               const label =
-                rj?.results?.[0]?.name ||
+                (rj &&
+                  rj.results &&
+                  Array.isArray(rj.results) &&
+                  rj.results[0] &&
+                  (rj.results[0] as Record<string, unknown>).name) ||
                 last ||
                 `${latitude.toFixed(2)},${longitude.toFixed(2)}` ||
                 fallbackCity;
 
-              await loadForecastByCityName(label);
-              setQuery(label);
-            } catch (err) {
+              await loadForecastByCityName(String(label));
+              setQuery(String(label));
+            } catch {
               const city = last || fallbackCity;
               await loadForecastByCityName(city);
               setQuery(city);
@@ -328,7 +341,7 @@ export default function WeatherGodPage() {
         setQuery(fallbackCity);
       }
     })();
-  }, [isClient]);
+  }, [isClient, loadForecastByCityName]);
 
   const hourlyChartData = useMemo(() => {
     if (!forecast?.hourly) return [];
@@ -341,8 +354,8 @@ export default function WeatherGodPage() {
           hour: "2-digit",
           minute: "2-digit",
         }),
-        temp: unit === "F" ? cToF(temp) ?? temp : Math.round(temp),
-        feels: unit === "F" ? cToF(feels) ?? feels : Math.round(feels),
+        temp: unit === "F" ? cToF(temp) : Math.round(temp),
+        feels: unit === "F" ? cToF(feels) : Math.round(feels),
         rain: forecast.hourly!.precipitation_probability[i],
       };
     });
@@ -401,9 +414,20 @@ export default function WeatherGodPage() {
     <div className={`wg-root suppress ${bgClass}`}>
       <motion.div className="wg-aurora" />
       <div className="wg-shell">
-        {/* Sidebar */}
         <aside className={`wg-sidebar ${sidebarOpen ? "open" : "closed"}`}>
-          <div className="wg-row" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div
+            className="wg-row"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              gap: 16,
+            }}
+          >
+            {sidebarOpen && (
+              <img src="/logo.png" alt="Easy Weather Logo" style={{ height: 38 }} />
+            )}
+
             <button
               onClick={() => setSidebarOpen((v) => !v)}
               className="wg-chip"
@@ -414,13 +438,20 @@ export default function WeatherGodPage() {
             </button>
 
             {sidebarOpen && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  opacity: 0.8,
+                  fontSize: 14,
+                }}
+              >
                 <Settings className="icon-4" /> <span>Settings</span>
               </div>
             )}
           </div>
 
-          {/* Units */}
           {sidebarOpen && (
             <div className="wg-side-card">
               <p className="wg-side-title">Units</p>
@@ -451,7 +482,6 @@ export default function WeatherGodPage() {
             </div>
           )}
 
-          {/* Favorites */}
           <div className="wg-side-card wg-favorites">
             {sidebarOpen && isClient ? (
               <>
@@ -491,13 +521,20 @@ export default function WeatherGodPage() {
                 </div>
               </>
             ) : !sidebarOpen ? (
-              <Star className="icon-5" />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Star className="icon-5" />
+              </div>
             ) : (
               <p className="wg-muted">Loading…</p>
             )}
           </div>
 
-          {/* Recents */}
           {sidebarOpen && (
             <div className="wg-side-card">
               <div className="wg-row" style={{ marginBottom: 6 }}>
@@ -521,7 +558,15 @@ export default function WeatherGodPage() {
                 ) : (
                   <div className="wg-side-list wg-recents-scroll">
                     {recents.map((r) => (
-                      <div key={r} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <div
+                        key={r}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
                         <button
                           onClick={() => loadForecastByCityName(r)}
                           className="wg-link"
@@ -547,7 +592,6 @@ export default function WeatherGodPage() {
             </div>
           )}
 
-          {/* Install App */}
           {installPrompt && !isStandalone && (
             <button
               onClick={async () => {
@@ -556,6 +600,8 @@ export default function WeatherGodPage() {
                 setInstallPrompt(null);
               }}
               className="wg-btn-cta wg-install"
+              title="Install as an app (PWA)"
+              aria-label="Install App"
             >
               <Download className="icon-4" />
               Install App
@@ -563,10 +609,58 @@ export default function WeatherGodPage() {
           )}
         </aside>
 
-        {/* Main */}
         <main className="wg-container">
           <div className="wg-container-inner">
-            {/* Search */}
+            <div className="wg-row" style={{ marginBottom: 24 }}>
+              <div>
+                <button
+                  onClick={async () => {
+                    setError(null);
+                    if (!("geolocation" in navigator)) {
+                      setError("Geolocation not supported in this browser.");
+                      return;
+                    }
+                    setLoading(true);
+                    navigator.geolocation.getCurrentPosition(
+                      async (pos) => {
+                        try {
+                          const { latitude, longitude } = pos.coords;
+                          const rev = await fetch(
+                            `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${latitude}&longitude=${longitude}&language=en`
+                          );
+                          const rj = await rev.json();
+                          const label =
+                            (rj &&
+                              rj.results &&
+                              Array.isArray(rj.results) &&
+                              rj.results[0] &&
+                              (rj.results[0] as Record<string, unknown>)
+                                .name) ||
+                            `${latitude.toFixed(2)},${longitude.toFixed(2)}`;
+                          await loadForecastByCityName(String(label));
+                          setQuery(String(label));
+                        } catch {
+                          setError("Could not reverse geocode location.");
+                        } finally {
+                          setLoading(false);
+                        }
+                      },
+                      (err) => {
+                        setLoading(false);
+                        setError(err.message || "Location permission denied.");
+                      },
+                      { enableHighAccuracy: true, timeout: 8000 }
+                    );
+                  }}
+                  className="wg-chip"
+                  title="Use my location"
+                >
+                  <LocateFixed className="icon-5" />
+                  My location
+                </button>
+              </div>
+            </div>
+
             <div style={{ position: "relative", marginBottom: 20 }}>
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ position: "relative", flex: 1 }}>
@@ -603,11 +697,40 @@ export default function WeatherGodPage() {
               )}
             </div>
 
-            {/* Forecast */}
+            {((forecast && forecast.hourly?.precipitation_probability) ||
+              forecast?.current_weather?.windspeed) && (
+              <div className="wg-grid-2" style={{ marginBottom: 20 }}>
+                {forecast?.hourly?.precipitation_probability
+                  ?.slice(0, 6)
+                  .some((p) => p >= 50) && (
+                  <div className="wg-alert wg-alert-blue">
+                    <CloudRain className="icon-5" />
+                    <p>Increased rain probability in the next few hours.</p>
+                  </div>
+                )}
+                {(forecast?.current_weather?.windspeed ?? 0) >= 35 && (
+                  <div className="wg-alert wg-alert-cyan">
+                    <Wind className="icon-5" />
+                    <p>Gusty winds right now. Secure loose items.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {loading && (
+              <p className="wg-pulse" style={{ fontSize: 18 }}>
+                Summoning ⚡...
+              </p>
+            )}
+
             {forecast && !loading && (
-              <div className={`wg-card ${compact ? "wg-space-6" : "wg-space-8"}`}>
+              <div
+                className={`wg-card ${compact ? "wg-space-6" : "wg-space-8"}`}
+              >
                 <div className="wg-forecast-header">
-                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 16 }}
+                  >
                     {chooseIconByTemp(
                       forecast.current_weather?.temperature ??
                         forecast.hourly?.temperature_2m?.[0]
@@ -615,7 +738,9 @@ export default function WeatherGodPage() {
                     <div>
                       <h2 className="wg-h2">
                         {forecast.place?.name}
-                        {forecast.place?.country ? `, ${forecast.place.country}` : ""}
+                        {forecast.place?.country
+                          ? `, ${forecast.place.country}`
+                          : ""}
                       </h2>
                       <p style={{ color: "var(--muted)" }}>{timeLabel}</p>
                     </div>
@@ -629,7 +754,14 @@ export default function WeatherGodPage() {
                         unit
                       )}
                     </p>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        justifyContent: "flex-end",
+                        marginTop: 8,
+                      }}
+                    >
                       <button
                         onClick={addFavoriteFromForecast}
                         className="wg-chip"
@@ -648,7 +780,10 @@ export default function WeatherGodPage() {
                     <div>
                       <p className="k">Feels like</p>
                       <p className="v">
-                        {formatTemp(forecast.hourly?.apparent_temperature?.[0], unit)}
+                        {formatTemp(
+                          forecast.hourly?.apparent_temperature?.[0],
+                          unit
+                        )}
                       </p>
                     </div>
                   </div>
@@ -666,7 +801,8 @@ export default function WeatherGodPage() {
                     <div>
                       <p className="k">Rain chance</p>
                       <p className="v">
-                        {forecast.hourly?.precipitation_probability?.[0] ?? "—"}%
+                        {forecast.hourly?.precipitation_probability?.[0] ?? "—"}
+                        %
                       </p>
                     </div>
                   </div>
@@ -675,7 +811,8 @@ export default function WeatherGodPage() {
                     <div>
                       <p className="k">Wind</p>
                       <p className="v">
-                        {Math.round(forecast.current_weather?.windspeed ?? 0)} km/h
+                        {Math.round(forecast.current_weather?.windspeed ?? 0)}{" "}
+                        km/h
                       </p>
                     </div>
                   </div>
@@ -692,14 +829,32 @@ export default function WeatherGodPage() {
 
                 <div>
                   <h3 className="wg-h3">Next 24 hours</h3>
-                  <div style={{ height: 256, width: "100%", background: "var(--black-20)", padding: 8, borderRadius: 12 }}>
+                  <div
+                    style={{
+                      height: 256,
+                      width: "100%",
+                      background: "var(--black-20)",
+                      padding: 8,
+                      borderRadius: 12,
+                    }}
+                  >
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={hourlyChartData}>
                         <XAxis dataKey="time" />
                         <YAxis />
                         <Tooltip />
-                        <Line type="monotone" dataKey="temp" stroke="#facc15" strokeWidth={3} />
-                        <Line type="monotone" dataKey="feels" stroke="#60a5fa" strokeWidth={2} />
+                        <Line
+                          type="monotone"
+                          dataKey="temp"
+                          stroke="#facc15"
+                          strokeWidth={3}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="feels"
+                          stroke="#60a5fa"
+                          strokeWidth={2}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -710,18 +865,31 @@ export default function WeatherGodPage() {
                     <h3 className="wg-h3">7-day outlook</h3>
                     <div className="wg-daily-grid">
                       {forecast.daily.time.map((t, i) => {
-                        const max = forecast.daily?.temperature_2m_max?.[i] ?? 0;
-                        const min = forecast.daily?.temperature_2m_min?.[i] ?? 0;
+                        const max =
+                          forecast.daily?.temperature_2m_max?.[i] ?? 0;
+                        const min =
+                          forecast.daily?.temperature_2m_min?.[i] ?? 0;
                         return (
                           <div key={t} className="wg-daily-card">
                             <p style={{ fontSize: 13, color: "var(--muted)" }}>
-                              {new Date(t).toLocaleDateString(undefined, { weekday: "short" })}
+                              {new Date(t).toLocaleDateString(undefined, {
+                                weekday: "short",
+                              })}
                             </p>
-                            <div style={{ margin: "8px 0", display: "flex", justifyContent: "center" }}>
+                            <div
+                              style={{
+                                margin: "8px 0",
+                                display: "flex",
+                                justifyContent: "center",
+                              }}
+                            >
                               {chooseIconByTemp(max)}
                             </div>
                             <p style={{ fontSize: 13 }}>
-                              <span style={{ fontWeight: 700 }}>{formatTemp(max, unit)}</span> / {formatTemp(min, unit)}
+                              <span style={{ fontWeight: 700 }}>
+                                {formatTemp(max, unit)}
+                              </span>{" "}
+                              / {formatTemp(min, unit)}
                             </p>
                           </div>
                         );
