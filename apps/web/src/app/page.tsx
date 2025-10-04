@@ -285,8 +285,9 @@ function closestHourlyIndex(times: string[] | undefined, targetIso?: string) {
 ======================================= */
 
 /** Prefer the forecast/place timezone; fallback to browser TZ */
+/** Prefer the forecast/place timezone; fallback to browser TZ */
 function getForecastTZ(
-  forecast?: { place?: { timezone?: string } } & { timezone?: string }
+  forecast?: ({ place?: { timezone?: string } } & { timezone?: string }) | null
 ): string {
   return (
     forecast?.place?.timezone ||
@@ -294,6 +295,7 @@ function getForecastTZ(
     Intl.DateTimeFormat().resolvedOptions().timeZone
   );
 }
+
 
 /** Format an hour in forecast TZ, 24h clock */
 function formatHourLabel(isoLike: string, tz: string) {
