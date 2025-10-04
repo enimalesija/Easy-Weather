@@ -363,7 +363,7 @@
   margin-top: 16px;
 }
 .wg-space-8 > * + * {
-  margin-top: 20px;
+  margin-top: 1px;
 }
 .wg-pulse {
   animation: pulse 1.2s ease-in-out infinite;
