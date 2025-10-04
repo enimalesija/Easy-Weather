@@ -1,9 +1,10 @@
 // apps/web/src/app/api/forecast/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-/* ----------------------------- Types ----------------------------- */
-
-type Geocode = {
+/* ---------------------------------------
+   Types
+--------------------------------------- */
+type GeocodeResult = {
   name: string;
   country?: string;
   admin1?: string;
@@ -12,127 +13,117 @@ type Geocode = {
   timezone?: string;
 };
 
-type OpenMeteoGeocodeResult = {
-  name: string;
-  country?: string;
-  admin1?: string;
-  latitude: number;
-  longitude: number;
-  timezone?: string;
+type OpenMeteoGeocodeJSON = {
+  results?: Array<{
+    name: string;
+    country?: string;
+    admin1?: string;
+    latitude: number;
+    longitude: number;
+    timezone?: string;
+  }>;
 };
 
-type OpenMeteoGeocodeResponse = {
-  results?: OpenMeteoGeocodeResult[];
+type OpenMeteoForecastJSON = {
+  current_weather?: {
+    temperature: number;
+    weathercode: number;
+    windspeed: number;
+    time: string; // local time from API
+  };
+  hourly?: {
+    time: string[];
+    temperature_2m: number[];
+    apparent_temperature: number[];
+    relative_humidity_2m: number[];
+    precipitation_probability: number[];
+    weathercode: number[];
+  };
+  daily?: {
+    time: string[];
+    weathercode: number[];                      // <-- we ensure this exists now
+    temperature_2m_max: number[];
+    temperature_2m_min: number[];
+    sunrise: string[];
+    sunset: string[];
+  };
 };
 
-type WeatherCurrent = {
-  temperature: number;
-  weathercode: number;
-  windspeed: number;
-  time: string;
-};
-
-type WeatherHourly = {
-  time: string[];
-  temperature_2m: number[];
-  apparent_temperature: number[];
-  relative_humidity_2m: number[];
-  precipitation_probability: number[];
-  weathercode: number[];
-};
-
-type WeatherDaily = {
-  time: string[];
-  temperature_2m_max: number[];
-  temperature_2m_min: number[];
-  sunrise: string[];
-  sunset: string[];
-};
-
-type OpenMeteoWeatherResponse = {
-  current_weather?: WeatherCurrent | null;
-  hourly?: WeatherHourly | null;
-  daily?: WeatherDaily | null;
-};
-
-type AirQualityHourly = {
-  time: string[];
-  european_aqi: number[];
-  pm2_5: number[];
-};
-
-type OpenMeteoAQIResponse = {
-  hourly?: Partial<AirQualityHourly> | null;
-};
-
-type AirQualityPayload = {
-  european_aqi: number[];
-  pm2_5: number[];
-  time: string[];
-  current: { european_aqi: number; pm2_5: number } | null;
+type OpenMeteoAQIJSON = {
+  hourly?: {
+    time: string[];
+    european_aqi?: number[];
+    pm2_5?: number[];
+  };
 };
 
 type ForecastPayload = {
-  place: Geocode;
-  current_weather: WeatherCurrent | null | undefined;
-  hourly: WeatherHourly | null | undefined;
-  daily: WeatherDaily | null | undefined;
-  air_quality: AirQualityPayload;
+  place: GeocodeResult;
+  current_weather: OpenMeteoForecastJSON["current_weather"] | null;
+  hourly: OpenMeteoForecastJSON["hourly"] | null;
+  daily: OpenMeteoForecastJSON["daily"] | null;
+  air_quality: {
+    european_aqi: number[];
+    pm2_5: number[];
+    time: string[];
+    current: { european_aqi?: number; pm2_5?: number } | null;
+  };
 };
 
-/* --------------------- Timed fetch with retries ------------------ */
-
+/* ---------------------------------------
+   Small helper: timed fetch + retries
+--------------------------------------- */
 async function fetchRetry(
   url: string,
   opts: RequestInit & { timeoutMs?: number } = {},
   retries = 3,
   backoffMs = 500
 ): Promise<Response> {
-  const { timeoutMs = 10000, ...init } = opts;
+  const { timeoutMs = 10_000, ...init } = opts;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
       const res = await fetch(url, {
         ...init,
         signal: controller.signal,
         cache: "no-store",
-        next: { revalidate: 0 },
         headers: {
           "user-agent": "weather-god/1.0",
           ...(init.headers || {}),
         },
+        // next: { revalidate: 0 } — not necessary with cache:"no-store"
       });
       clearTimeout(id);
-
       if (!res.ok) {
         if (res.status >= 500 && attempt < retries) {
-          await new Promise((r) => setTimeout(r, backoffMs * Math.pow(2, attempt)));
+          await new Promise((r) =>
+            setTimeout(r, backoffMs * Math.pow(2, attempt))
+          );
           continue;
         }
         throw new Error(`HTTP ${res.status}`);
       }
-
       return res;
-    } catch (err: unknown) {
+    } catch (err) {
       clearTimeout(id);
       if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, backoffMs * Math.pow(2, attempt)));
+        await new Promise((r) =>
+          setTimeout(r, backoffMs * Math.pow(2, attempt))
+        );
         continue;
       }
-      throw err;
+      throw err as Error;
     }
   }
-
-  // Should never reach here
   throw new Error("fetchRetry exhausted");
 }
 
-/* ---------------------------- Helpers ---------------------------- */
-
-function pickFirstResult(results: OpenMeteoGeocodeResult[] | undefined): Geocode | null {
+/* ---------------------------------------
+   Utilities
+--------------------------------------- */
+function pickFirstResult(results?: OpenMeteoGeocodeJSON["results"]): GeocodeResult | null {
   if (!results || results.length === 0) return null;
   const r = results[0];
   return {
@@ -145,57 +136,76 @@ function pickFirstResult(results: OpenMeteoGeocodeResult[] | undefined): Geocode
   };
 }
 
-/* ------------------------------ Route ---------------------------- */
-
+/* ---------------------------------------
+   GET
+--------------------------------------- */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const cityRaw = (searchParams.get("city") || "Stockholm").trim();
 
-    // 1) Geocode
-    const geocodeUrl =
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityRaw)}` +
-      `&count=1&language=en&format=json`;
+    // Inputs: either city OR explicit lat/lon
+    const cityRaw = (searchParams.get("city") || "").trim();
+    const latParam = searchParams.get("lat");
+    const lonParam = searchParams.get("lon");
 
-    let place: Geocode | null = null;
-    try {
-      const geocodeRes = await fetchRetry(geocodeUrl, { timeoutMs: 10000 });
-      const geocodeJson: OpenMeteoGeocodeResponse = await geocodeRes.json();
-      place = pickFirstResult(geocodeJson?.results);
-    } catch (e: unknown) {
-      // Keep going with fallback
-      // eslint-disable-next-line no-console
-      console.warn("Geocoding failed:", e instanceof Error ? e.message : String(e));
-    }
+    let place: GeocodeResult | null = null;
 
-    if (!place) {
+    if (latParam && lonParam && !Number.isNaN(+latParam) && !Number.isNaN(+lonParam)) {
+      // If coords provided, skip geocode
       place = {
-        name: cityRaw,
-        latitude: 59.3293,
-        longitude: 18.0686,
-        country: "Sweden",
+        name: cityRaw || "My location",
+        latitude: Number(latParam),
+        longitude: Number(lonParam),
+        country: undefined,
         timezone: "auto",
       };
+    } else {
+      const city = cityRaw || "Stockholm";
+
+      // Geocode the city
+      const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+        city
+      )}&count=1&language=en&format=json`;
+
+      try {
+        const geocodeRes = await fetchRetry(geocodeUrl, { timeoutMs: 10_000 });
+        const geocodeJson = (await geocodeRes.json()) as OpenMeteoGeocodeJSON;
+        place = pickFirstResult(geocodeJson.results);
+      } catch {
+        // swallow — we’ll fallback below
+      }
+
+      // Fallback if geocoding failed
+      if (!place) {
+        place = {
+          name: city,
+          latitude: 59.3293,
+          longitude: 18.0686,
+          country: "Sweden",
+          timezone: "auto",
+        };
+      }
     }
 
-    const { latitude: lat, longitude: lon } = place;
+    const lat = place.latitude;
+    const lon = place.longitude;
 
-    // 2) Weather
+    // Weather: ensure daily=weathercode is requested
     const weatherUrl =
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,weathercode` +
-      `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset` +
+      `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weathercode` + // <-- added weathercode
       `&current_weather=true&timezone=auto`;
 
-    const weatherRes = await fetchRetry(weatherUrl, { timeoutMs: 12000 });
-    const weather: OpenMeteoWeatherResponse = await weatherRes.json();
+    const weatherRes = await fetchRetry(weatherUrl, { timeoutMs: 12_000 });
+    const weatherJson = (await weatherRes.json()) as OpenMeteoForecastJSON;
 
-    // 3) Air Quality
+    // Air Quality
     const aqiUrl =
       `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}` +
       `&hourly=european_aqi,pm2_5&timezone=auto`;
 
-    let air_quality: AirQualityPayload = {
+    let air_quality: ForecastPayload["air_quality"] = {
       european_aqi: [],
       pm2_5: [],
       time: [],
@@ -203,55 +213,56 @@ export async function GET(req: NextRequest) {
     };
 
     try {
-      const aqiRes = await fetchRetry(aqiUrl, { timeoutMs: 12000 }, 2);
-      const aqiJson: OpenMeteoAQIResponse = await aqiRes.json();
+      const aqiRes = await fetchRetry(aqiUrl, { timeoutMs: 12_000 }, 2);
+      const aqiJson = (await aqiRes.json()) as OpenMeteoAQIJSON;
 
-      const hourly = aqiJson?.hourly;
-      const aqi = (hourly?.european_aqi ?? []) as number[];
-      const pm25 = (hourly?.pm2_5 ?? []) as number[];
-      const time = (hourly?.time ?? []) as string[];
+      const times = aqiJson.hourly?.time ?? [];
+      const aqi = aqiJson.hourly?.european_aqi ?? [];
+      const pm25 = aqiJson.hourly?.pm2_5 ?? [];
 
-      const currentTime = weather?.current_weather?.time;
-      const current =
-        currentTime && time.length > 0
-          ? (() => {
-              const idx = time.indexOf(currentTime);
-              if (idx >= 0) {
-                return {
-                  european_aqi: aqi[idx] ?? aqi[0],
-                  pm2_5: pm25[idx] ?? pm25[0],
-                };
-              }
-              return null;
-            })()
-          : null;
+      // Align "current" AQI to current weather time if possible
+      let current: { european_aqi?: number; pm2_5?: number } | null = null;
+      const cwTime = weatherJson.current_weather?.time;
+      if (cwTime && times.length) {
+        const idx = times.indexOf(cwTime);
+        if (idx >= 0) {
+          current = {
+            european_aqi: aqi[idx],
+            pm2_5: pm25[idx],
+          };
+        }
+      }
 
       air_quality = {
         european_aqi: aqi,
         pm2_5: pm25,
-        time,
+        time: times,
         current,
       };
-    } catch (e: unknown) {
-      // eslint-disable-next-line no-console
-      console.warn("Air quality fetch failed:", e instanceof Error ? e.message : String(e));
+    } catch {
+      // keep defaults
     }
 
-    // 4) Response
     const payload: ForecastPayload = {
       place,
-      current_weather: weather?.current_weather ?? null,
-      hourly: weather?.hourly ?? null,
-      daily: weather?.daily ?? null,
+      current_weather: weatherJson.current_weather ?? null,
+      hourly: weatherJson.hourly ?? null,
+      daily: weatherJson.daily ?? null,
       air_quality,
     };
 
-    return NextResponse.json(payload, { status: 200 });
-  } catch (err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: "Forecast API failed", detail },
-      { status: 502 }
-    );
+    return new NextResponse(JSON.stringify(payload), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store, max-age=0",
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return new NextResponse(JSON.stringify({ error: "Forecast API failed", detail: msg }), {
+      status: 502,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    });
   }
 }
