@@ -124,7 +124,8 @@ function setCookie(name: string, value: string, days = 365) {
 function nanoid(len = 22) {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let out = "";
-  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < len; i++)
+    out += chars[Math.floor(Math.random() * chars.length)];
   return out;
 }
 function ensureUserId(): string {
@@ -177,6 +178,115 @@ function bgClassByConditions(temp: number | undefined, rainProb?: number) {
   return "bg-default";
 }
 
+/** interpret conditions */
+function interpretConditions(
+  weathercode?: number,
+  precipProb?: number,
+  currentIso?: string
+): {
+  label: string;
+  theme:
+    | "rain"
+    | "snow"
+    | "storm"
+    | "fog"
+    | "sunny"
+    | "cloudy"
+    | "night"
+    | "default";
+} {
+  const p = precipProb ?? 0;
+  const code = weathercode ?? -1;
+  let isNight = false;
+  if (currentIso) {
+    const d = new Date(currentIso);
+    const h = d.getHours();
+    isNight = h < 6 || h >= 20;
+  }
+  const isThunder = code === 95 || code === 96 || code === 99;
+  const isRain =
+    (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || p >= 50;
+  const isSnow = (code >= 71 && code <= 77) || code === 85 || code === 86;
+  const isFog = code === 45 || code === 48;
+  const isCloudy = code === 2 || code === 3;
+  const isClear = code === 0 || code === 1;
+  if (isThunder) return { label: "Stormy", theme: "storm" };
+  if (isSnow) return { label: "Snowy", theme: "snow" };
+  if (isRain) return { label: "Rainy", theme: "rain" };
+  if (isFog) return { label: "Foggy", theme: "fog" };
+  if (isClear)
+    return {
+      label: isNight ? "Clear Night" : "Sunny",
+      theme: isNight ? "night" : "sunny",
+    };
+  if (isCloudy)
+    return { label: isNight ? "Cloudy Night" : "Cloudy", theme: "cloudy" };
+  return {
+    label: isNight ? "Night" : "—",
+    theme: isNight ? "night" : "default",
+  };
+}
+
+/** NEW: card-only background */
+function cardBackgroundStyle(theme: string): React.CSSProperties {
+  const base: React.CSSProperties = {
+    position: "absolute",
+    inset: 0,
+    backgroundPosition: "center",
+    backgroundSize: "cover",
+    backgroundRepeat: "no-repeat",
+    borderRadius: 16,
+    opacity: 0.35,
+    zIndex: 0,
+    pointerEvents: "none",
+  };
+  switch (theme) {
+    case "rain":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://www.gifcen.com/wp-content/uploads/2023/08/rain-gif-9.gif')",
+      };
+    case "snow":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://sanjuanheadwaters.org/wp-content/uploads/2023/02/snow-falling-gif.gif')",
+      };
+    case "storm":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://cdn.pixabay.com/animation/2025/03/20/16/33/16-33-20-645_512.gif')",
+      };
+    case "fog":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://i.pinimg.com/originals/03/53/cd/0353cdf9b3b43ea8e16506cde3ec94ef.gif')",
+      };
+    case "sunny":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT56YfDy5qmq-mfIHirK9AX-76K4DcMlTBr2Q&s')",
+      };
+    case "cloudy":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://i.pinimg.com/originals/b6/7f/61/b67f61a1364ea22a050d701c7bf7858f.gif')",
+      };
+    case "night":
+      return {
+        ...base,
+        backgroundImage:
+          "url('https://cdn.pixabay.com/animation/2023/09/06/23/18/23-18-03-337_512.gif')",
+      };
+    default:
+      return { ...base, background: "linear-gradient(135deg,#0f172a,#1e293b)" };
+  }
+}
 /* ---------------------------------------
    Component
 --------------------------------------- */
@@ -208,7 +318,8 @@ export default function WeatherGodPage() {
   const [recents, setRecents] = useState<string[]>([]);
 
   // PWA install
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installPrompt, setInstallPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
@@ -216,8 +327,8 @@ export default function WeatherGodPage() {
       setIsStandalone(
         (window.matchMedia &&
           window.matchMedia("(display-mode: standalone)").matches) ||
-          (window as unknown as { navigator?: { standalone?: boolean } })?.navigator
-            ?.standalone === true
+          (window as unknown as { navigator?: { standalone?: boolean } })
+            ?.navigator?.standalone === true
       );
     checkStandalone();
 
@@ -246,8 +357,12 @@ export default function WeatherGodPage() {
     try {
       const u = (localStorage.getItem(LS_KEYS.unit) as "C" | "F") || "C";
       const c = localStorage.getItem(LS_KEYS.compact) === "1";
-      const f = JSON.parse(localStorage.getItem(LS_KEYS.favorites) || "[]");
-      const r = JSON.parse(localStorage.getItem(LS_KEYS.recents) || "[]");
+      const f = JSON.parse(
+        localStorage.getItem(LS_KEYS.favorites) || "[]"
+      ) as Suggestion[];
+      const r = JSON.parse(
+        localStorage.getItem(LS_KEYS.recents) || "[]"
+      ) as string[];
       setUnit(u);
       setCompact(c);
       setFavorites(Array.isArray(f) ? f : []);
@@ -264,14 +379,19 @@ export default function WeatherGodPage() {
     if (isClient && userId) localStorage.setItem(LS_KEYS.unit, unit);
   }, [unit, isClient, userId, LS_KEYS]);
   useEffect(() => {
-    if (isClient && userId) localStorage.setItem(LS_KEYS.compact, compact ? "1" : "0");
+    if (isClient && userId)
+      localStorage.setItem(LS_KEYS.compact, compact ? "1" : "0");
   }, [compact, isClient, userId, LS_KEYS]);
   useEffect(() => {
-    if (isClient && userId) localStorage.setItem(LS_KEYS.favorites, JSON.stringify(favorites));
+    if (isClient && userId)
+      localStorage.setItem(LS_KEYS.favorites, JSON.stringify(favorites));
   }, [favorites, isClient, userId, LS_KEYS]);
   useEffect(() => {
     if (isClient && userId)
-      localStorage.setItem(LS_KEYS.recents, JSON.stringify(recents.slice(0, 8)));
+      localStorage.setItem(
+        LS_KEYS.recents,
+        JSON.stringify(recents.slice(0, 8))
+      );
   }, [recents, isClient, userId, LS_KEYS]);
 
   /* Suggestions */
@@ -315,34 +435,42 @@ export default function WeatherGodPage() {
   }, [debounced]);
 
   /* API call */
-  const loadForecastByCityName = useCallback(async (city: string) => {
-    if (!city) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/forecast?city=${encodeURIComponent(city)}`);
-      const json: Forecast | { error?: string } = await res.json();
-      if (res.ok) {
-        setForecast(json as Forecast);
-        setRecents((r) => {
-          const n = [city, ...r.filter((x) => x.toLowerCase() !== city.toLowerCase())];
-          if (isClient && userId) localStorage.setItem(LS_KEYS.lastCity, city);
-          return n.slice(0, 8);
-        });
-      } else {
-        const msg =
-          (json as { error?: string })?.error || "Failed to fetch forecast";
-        throw new Error(msg);
+  const loadForecastByCityName = useCallback(
+    async (city: string) => {
+      if (!city) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/forecast?city=${encodeURIComponent(city)}`
+        );
+        const json: Forecast | { error?: string } = await res.json();
+        if (res.ok) {
+          setForecast(json as Forecast);
+          setRecents((r) => {
+            const n = [
+              city,
+              ...r.filter((x) => x.toLowerCase() !== city.toLowerCase()),
+            ];
+            if (isClient && userId)
+              localStorage.setItem(LS_KEYS.lastCity, city);
+            return n.slice(0, 8);
+          });
+        } else {
+          const msg =
+            (json as { error?: string })?.error || "Failed to fetch forecast";
+          throw new Error(msg);
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        setForecast(null);
+        setError(msg);
+      } finally {
+        setLoading(false);
       }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      setForecast(null);
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [LS_KEYS.lastCity, isClient, userId]);
-
+    },
+    [LS_KEYS.lastCity, isClient, userId]
+  );
   /* First load */
   useEffect(() => {
     if (!isClient || !userId) return;
@@ -366,7 +494,8 @@ export default function WeatherGodPage() {
               const rev = await fetch(
                 `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${latitude}&longitude=${longitude}&language=en`
               );
-              const rj: { results?: Array<{ name?: string }> } = await rev.json();
+              const rj: { results?: Array<{ name?: string }> } =
+                await rev.json();
 
               const label =
                 rj?.results?.[0]?.name ||
@@ -376,7 +505,7 @@ export default function WeatherGodPage() {
 
               await loadForecastByCityName(label);
               setQuery(label);
-            } catch (err) {
+            } catch {
               const city = last || fallbackCity;
               await loadForecastByCityName(city);
               setQuery(city);
@@ -414,6 +543,15 @@ export default function WeatherGodPage() {
     });
   }, [forecast, unit]);
 
+  // Interpret conditions for background + header label
+  const conditions = useMemo(() => {
+    return interpretConditions(
+      forecast?.current_weather?.weathercode,
+      forecast?.hourly?.precipitation_probability?.[0],
+      forecast?.current_weather?.time
+    );
+  }, [forecast]);
+
   const bgClass = bgClassByConditions(
     forecast?.current_weather?.temperature ??
       forecast?.hourly?.temperature_2m?.[0],
@@ -448,14 +586,16 @@ export default function WeatherGodPage() {
   function removeRecent(city: string) {
     setRecents((prev) => {
       const nxt = prev.filter((r) => r.toLowerCase() !== city.toLowerCase());
-      if (isClient && userId) localStorage.setItem(LS_KEYS.recents, JSON.stringify(nxt));
+      if (isClient && userId)
+        localStorage.setItem(LS_KEYS.recents, JSON.stringify(nxt));
       return nxt;
     });
   }
 
   function clearRecents() {
     setRecents([]);
-    if (isClient && userId) localStorage.setItem(LS_KEYS.recents, JSON.stringify([]));
+    if (isClient && userId)
+      localStorage.setItem(LS_KEYS.recents, JSON.stringify([]));
   }
 
   const timeLabel =
@@ -463,10 +603,28 @@ export default function WeatherGodPage() {
       ? new Date(forecast.current_weather.time).toLocaleString()
       : "—";
 
+  // Build a human city label "City, Country — Condition"
+  const headerCityLabel = useMemo(() => {
+    const name = forecast?.place?.name ?? "";
+    const ctry = forecast?.place?.country ? `, ${forecast.place.country}` : "";
+    const cond =
+      conditions.label && conditions.label !== "—"
+        ? ` — ${conditions.label}`
+        : "";
+    return `${name}${ctry}${cond}`;
+  }, [forecast?.place?.name, forecast?.place?.country, conditions.label]);
+
   return (
-    <div className={`wg-root suppress ${bgClass}`}>
-      <motion.div className="wg-aurora" />
-      <div className="wg-shell">
+    <div
+      className={`wg-root suppress ${bgClass}`}
+      style={{ position: "relative" }}
+    >
+      {/* Removed global overlay here */}
+      <motion.div
+        className="wg-aurora"
+        style={{ position: "relative", zIndex: 1 }}
+      />
+      <div className="wg-shell" style={{ position: "relative", zIndex: 1 }}>
         {/* Sidebar */}
         <aside className={`wg-sidebar ${sidebarOpen ? "open" : "closed"}`}>
           <div
@@ -525,7 +683,8 @@ export default function WeatherGodPage() {
                   onClick={() => setUnit("C")}
                   className="wg-chip"
                   style={{
-                    background: unit === "C" ? "var(--accent)" : "var(--white-10)",
+                    background:
+                      unit === "C" ? "var(--accent)" : "var(--white-10)",
                     color: unit === "C" ? "#000" : "#fff",
                   }}
                 >
@@ -535,7 +694,8 @@ export default function WeatherGodPage() {
                   onClick={() => setUnit("F")}
                   className="wg-chip"
                   style={{
-                    background: unit === "F" ? "var(--accent)" : "var(--white-10)",
+                    background:
+                      unit === "F" ? "var(--accent)" : "var(--white-10)",
                     color: unit === "F" ? "#000" : "#fff",
                   }}
                 >
@@ -544,7 +704,6 @@ export default function WeatherGodPage() {
               </div>
             </div>
           )}
-
           {/* Favorites */}
           <div className="wg-side-card wg-favorites">
             {sidebarOpen && isClient ? (
@@ -657,7 +816,7 @@ export default function WeatherGodPage() {
             </div>
           )}
 
-          {/* Install App (only if prompt available) */}
+          {/* Install App */}
           {installPrompt && !isStandalone && (
             <button
               onClick={async () => {
@@ -678,52 +837,6 @@ export default function WeatherGodPage() {
         {/* Main */}
         <main className="wg-container">
           <div className="wg-container-inner">
-            {/* Header */}
-            <div className="wg-row" style={{ marginBottom: 24 }}>
-              <div>
-                <button
-                  onClick={async () => {
-                    setError(null);
-                    if (!("geolocation" in navigator)) {
-                      setError("Geolocation not supported in this browser.");
-                      return;
-                    }
-                    setLoading(true);
-                    navigator.geolocation.getCurrentPosition(
-                      async (pos) => {
-                        try {
-                          const { latitude, longitude } = pos.coords;
-                          const rev = await fetch(
-                            `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${latitude}&longitude=${longitude}&language=en`
-                          );
-                          const rj: { results?: Array<{ name?: string }> } = await rev.json();
-                          const label =
-                            rj?.results?.[0]?.name ||
-                            `${latitude.toFixed(2)},${longitude.toFixed(2)}`;
-                          await loadForecastByCityName(label);
-                          setQuery(label);
-                        } catch {
-                          setError("Could not reverse geocode location.");
-                        } finally {
-                          setLoading(false);
-                        }
-                      },
-                      (geoErr) => {
-                        setLoading(false);
-                        setError(geoErr?.message || "Location permission denied.");
-                      },
-                      { enableHighAccuracy: true, timeout: 8000 }
-                    );
-                  }}
-                  className="wg-chip"
-                  title="Use my location"
-                >
-                  <LocateFixed className="icon-5" />
-                  My location
-                </button>
-              </div>
-            </div>
-
             {/* Search */}
             <div style={{ position: "relative", marginBottom: 20 }}>
               <div style={{ display: "flex", gap: 8 }}>
@@ -733,6 +846,7 @@ export default function WeatherGodPage() {
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search city (e.g., Stockholm)…"
                     className="wg-input"
+                    aria-label="Search city"
                   />
                   {suggestions.length > 0 && (
                     <div ref={listRef} className="wg-suggest">
@@ -782,60 +896,64 @@ export default function WeatherGodPage() {
               </div>
             )}
 
-            {/* Loading */}
-            {loading && (
-              <p className="wg-pulse" style={{ fontSize: 18 }}>
-                Summoning ⚡...
-              </p>
-            )}
-
             {/* Forecast */}
             {forecast && !loading && (
-              <div className={`wg-card ${compact ? "wg-space-6" : "wg-space-8"}`}>
-                <div className="wg-forecast-header">
-                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                    {chooseIconByTemp(
-                      forecast.current_weather?.temperature ??
-                        forecast.hourly?.temperature_2m?.[0]
-                    )}
-                    <div>
-                      <h2 className="wg-h2">
-                        {forecast.place?.name}
-                        {forecast.place?.country ? `, ${forecast.place.country}` : ""}
-                      </h2>
-                      <p style={{ color: "var(--muted)" }}>{timeLabel}</p>
-                    </div>
-                  </div>
+              <div
+                className={`wg-card ${compact ? "wg-space-6" : "wg-space-8"}`}
+                style={{ position: "relative", overflow: "hidden" }}
+              >
+                {/* Card background overlay */}
+                <div style={cardBackgroundStyle(conditions.theme)} />
 
-                  <div style={{ textAlign: "right" }}>
-                    <p className="wg-forecast-temp">
-                      {formatTemp(
-                        forecast.current_weather?.temperature ??
-                          forecast.hourly?.temperature_2m?.[0],
-                        unit
-                      )}
-                    </p>
+                {/* Card content sits above */}
+                <div style={{ position: "relative", zIndex: 1 }}>
+                  <div className="wg-forecast-header">
                     <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        justifyContent: "flex-end",
-                        marginTop: 8,
-                      }}
+                      style={{ display: "flex", alignItems: "center", gap: 16 }}
                     >
-                      <button
-                        onClick={addFavoriteFromForecast}
-                        className="wg-chip"
-                        title="Add to favorites"
+                      {chooseIconByTemp(
+                        forecast.current_weather?.temperature ??
+                          forecast.hourly?.temperature_2m?.[0]
+                      )}
+                      <div>
+                        <h2 className="wg-h2">{headerCityLabel}</h2>
+                        <p style={{ color: "var(--muted)" }}>{timeLabel}</p>
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: "right" }}>
+                      <p className="wg-forecast-temp">
+                        {formatTemp(
+                          forecast.current_weather?.temperature ??
+                            forecast.hourly?.temperature_2m?.[0],
+                          unit
+                        )}
+                      </p>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          justifyContent: "flex-end",
+                          marginTop: 8,
+                        }}
                       >
-                        <Star className="icon-4" />
-                        Save
-                      </button>
+                        <button
+                          onClick={addFavoriteFromForecast}
+                          className="wg-chip"
+                          title="Add to favorites"
+                        >
+                          <Star className="icon-4" />
+                          Save
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="wg-metrics-bar">
+                <div
+                  className="wg-metrics-bar"
+                  style={{ position: "relative", zIndex: 1 }}
+                >
                   <div className="wg-metric-col">
                     <ThermometerSun className="icon-5" />
                     <div>
@@ -862,7 +980,8 @@ export default function WeatherGodPage() {
                     <div>
                       <p className="k">Rain chance</p>
                       <p className="v">
-                        {forecast.hourly?.precipitation_probability?.[0] ?? "—"}%
+                        {forecast.hourly?.precipitation_probability?.[0] ?? "—"}
+                        %
                       </p>
                     </div>
                   </div>
@@ -871,7 +990,8 @@ export default function WeatherGodPage() {
                     <div>
                       <p className="k">Wind</p>
                       <p className="v">
-                        {Math.round(forecast.current_weather?.windspeed ?? 0)} km/h
+                        {Math.round(forecast.current_weather?.windspeed ?? 0)}{" "}
+                        km/h
                       </p>
                     </div>
                   </div>
@@ -886,7 +1006,7 @@ export default function WeatherGodPage() {
                   </div>
                 </div>
 
-                <div>
+                <div style={{ position: "relative", zIndex: 1 }}>
                   <h3 className="wg-h3">Next 24 hours</h3>
                   <div
                     style={{
@@ -920,12 +1040,14 @@ export default function WeatherGodPage() {
                 </div>
 
                 {forecast.daily?.time && (
-                  <div>
+                  <div style={{ position: "relative", zIndex: 1 }}>
                     <h3 className="wg-h3">7-day outlook</h3>
                     <div className="wg-daily-grid">
                       {forecast.daily.time.map((t, i) => {
-                        const max = forecast.daily?.temperature_2m_max?.[i] ?? 0;
-                        const min = forecast.daily?.temperature_2m_min?.[i] ?? 0;
+                        const max =
+                          forecast.daily?.temperature_2m_max?.[i] ?? 0;
+                        const min =
+                          forecast.daily?.temperature_2m_min?.[i] ?? 0;
                         return (
                           <div key={t} className="wg-daily-card">
                             <p style={{ fontSize: 13, color: "var(--muted)" }}>
