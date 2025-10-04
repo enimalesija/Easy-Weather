@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { motion } from "framer-motion";
 import {
@@ -36,7 +36,7 @@ import "./style.css";
    Network utils
 ======================================= */
 
-async function fetchWithTimeout(url: string, ms = 12000) {
+async function fetchWithTimeout(url: string, ms = 12000): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
   try {
@@ -46,9 +46,11 @@ async function fetchWithTimeout(url: string, ms = 12000) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res;
-  } catch (err: any) {
-    if (err?.name === "AbortError") throw new Error("Request timed out");
-    throw err;
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out");
+    }
+    throw err instanceof Error ? err : new Error("Request failed");
   } finally {
     clearTimeout(id);
   }
@@ -133,7 +135,7 @@ type Forecast = {
     temperature: number;
     weathercode: number;
     windspeed: number;
-    time: string; // ISO-like (Open-Meteo local time)
+    time: string; // ISO-like (Open-Meteo local time string)
   };
   hourly?: {
     time: string[];
@@ -288,7 +290,7 @@ function getForecastTZ(
 ): string {
   return (
     forecast?.place?.timezone ||
-    (forecast as any)?.timezone ||
+    forecast?.timezone ||
     Intl.DateTimeFormat().resolvedOptions().timeZone
   );
 }
@@ -358,7 +360,8 @@ export default function WeatherGodPage() {
       setIsStandalone(
         (window.matchMedia &&
           window.matchMedia("(display-mode: standalone)").matches) ||
-          (window as any)?.navigator?.standalone === true
+          (window as unknown as { navigator?: { standalone?: boolean } })
+            ?.navigator?.standalone === true
       );
     checkStandalone();
 
@@ -465,9 +468,10 @@ export default function WeatherGodPage() {
           if (isClient && userId) localStorage.setItem(LS_KEYS.lastCity, city);
           return n.slice(0, 8);
         });
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
         setForecast(null);
-        setError(e?.message || "Unknown error");
+        setError(msg);
       } finally {
         setLoading(false);
       }
@@ -499,9 +503,10 @@ export default function WeatherGodPage() {
             ...r.filter((x) => x.toLowerCase() !== label.toLowerCase()),
           ].slice(0, 8)
         );
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
         setForecast(null);
-        setError(e?.message || "Unknown error");
+        setError(msg);
       } finally {
         setLoading(false);
       }
@@ -559,14 +564,15 @@ export default function WeatherGodPage() {
       async (pos) => {
         try {
           await loadForecastByCoords(pos.coords.latitude, pos.coords.longitude);
-        } catch (err: any) {
-          setError(err?.message || "Location lookup failed.");
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "Location lookup failed.";
+          setError(msg);
         } finally {
           setLoading(false);
         }
       },
       (err) => {
-        setError(err?.message || "Location denied.");
+        setError((err && "message" in err ? String((err as { message?: string }).message) : null) || "Location denied.");
         setLoading(false);
       },
       { enableHighAccuracy: true, timeout: 8000 }
@@ -659,7 +665,7 @@ export default function WeatherGodPage() {
     const len = forecast.hourly.time.length;
     const start = Math.max(0, nowIdx);
     const end = Math.min(len, start + 24);
-    const out = [];
+    const out: Array<{ time: string; temp: number; feels: number; rain: number }> = [];
     for (let i = start; i < end; i++) {
       const temp = forecast.hourly.temperature_2m[i];
       const feels = forecast.hourly.apparent_temperature[i];
@@ -692,8 +698,8 @@ export default function WeatherGodPage() {
   /* =======================================
      Card background
   ======================================= */
-  function cardBackgroundStyle(theme: string): React.CSSProperties {
-    const base: React.CSSProperties = {
+  function cardBackgroundStyle(theme: string): CSSProperties {
+    const base: CSSProperties = {
       position: "absolute",
       inset: 0,
       backgroundPosition: "center",
