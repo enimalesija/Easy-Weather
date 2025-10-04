@@ -258,53 +258,7 @@ Register it in your app root or `_document` if desired. In practice, Next.js can
 
 ---
 
-## 🔐 Production (Vercel) notes
 
-* Geolocation in the browser **requires HTTPS**.
-* If you see `Invalid time zone specified: auto`, ensure the API never returns `"auto"` to the client. (This repo’s `route.ts` normalizes it.)
-* If your **manifest.json** responds with **401** on Vercel:
-
-  * Make sure it’s placed under **`/public/manifest.json`**
-  * Do not wrap it with auth or middleware; it must be publicly readable
-* If **7‑day** isn’t showing in prod:
-
-  * Confirm your API adds `daily=... ,weathercode` to the Open‑Meteo URL
-  * Open devtools → Network → check `/api/forecast` response shape
-
----
-
-## 🧪 Troubleshooting
-
-### “Invalid time zone specified: auto”
-
-* Your client tried to format a date with `timeZone: "auto"`. Make sure your `/api/forecast` replaces `auto` with a valid IANA TZ or `UTC`.
-
-### “Could not detect your city” / slow reverse geocode
-
-* Reverse geocoding is best effort and can be slow on some networks. The client falls back to the last city or a default (Stockholm). You can increase timeouts or prefer `lat/lon` fetches and display the coordinates while waiting for name lookup.
-
-### GIFs not showing
-
-* Page CSP likely blocked external `img-src`. Self‑host the GIFs (recommended) **or** relax CSP with allowed hosts.
-
-### Build fails with ESLint `no-explicit-any`
-
-* The project types avoid `any`. If you add new code, prefer `unknown` + type guards.
-
-### Popup/Badge fails in Chrome MV3
-
-* Use `chrome.action.*` instead of `browser.browserAction.*`.
-* Background is a **service worker** (module), not a persistent page.
-
----
-
-## 📈 Performance tips
-
-* Use `cache: "no-store"` for API calls during development; add SWR or caching in production if needed.
-* Keep GIF overlays **card‑only** and slightly transparent.
-* Batch state updates when possible; memoize derived values (`useMemo`).
-
----
 
 ## ♿ Accessibility & UX
 
@@ -334,7 +288,7 @@ pnpm lint
 
 ## 📄 License
 
-MIT (or your preferred license). Replace this section if you require different terms.
+MIT 
 
 ---
 
@@ -345,4 +299,4 @@ MIT (or your preferred license). Replace this section if you require different t
 * Charts: **Recharts**
 * Hosting: **Vercel**
 
-If you run into issues, open devtools → **Network** tab, inspect `/api/forecast` payload, and compare it to the **API contract** above. That’s almost always the fastest path to resolution.
+Developed by Arben Malesija
