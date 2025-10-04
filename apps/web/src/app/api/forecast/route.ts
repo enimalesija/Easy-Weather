@@ -1,9 +1,10 @@
 // apps/web/src/app/api/forecast/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
-/* ---------------------------------------
-   Types
---------------------------------------- */
+/* =========================
+   Types (Open-Meteo shapes)
+========================= */
+
 type GeocodeResult = {
   name: string;
   country?: string;
@@ -13,55 +14,68 @@ type GeocodeResult = {
   timezone?: string;
 };
 
-type OpenMeteoGeocodeJSON = {
-  results?: Array<{
-    name: string;
-    country?: string;
-    admin1?: string;
-    latitude: number;
-    longitude: number;
-    timezone?: string;
-  }>;
+type GeocodeSearchResponse = {
+  results?: GeocodeResult[];
 };
 
-type OpenMeteoForecastJSON = {
-  current_weather?: {
-    temperature: number;
-    weathercode: number;
-    windspeed: number;
-    time: string; // local time from API
-  };
-  hourly?: {
-    time: string[];
-    temperature_2m: number[];
-    apparent_temperature: number[];
-    relative_humidity_2m: number[];
-    precipitation_probability: number[];
-    weathercode: number[];
-  };
-  daily?: {
-    time: string[];
-    weathercode: number[];                      // <-- we ensure this exists now
-    temperature_2m_max: number[];
-    temperature_2m_min: number[];
-    sunrise: string[];
-    sunset: string[];
-  };
+type CurrentWeather = {
+  temperature: number;
+  weathercode: number;
+  windspeed: number;
+  time: string; // local ISO from Open-Meteo
 };
 
-type OpenMeteoAQIJSON = {
-  hourly?: {
-    time: string[];
-    european_aqi?: number[];
-    pm2_5?: number[];
-  };
+type HourlyBlock = {
+  time: string[];
+  temperature_2m?: number[];
+  apparent_temperature?: number[];
+  relative_humidity_2m?: number[];
+  precipitation_probability?: number[];
+  weathercode?: number[];
 };
 
-type ForecastPayload = {
-  place: GeocodeResult;
-  current_weather: OpenMeteoForecastJSON["current_weather"] | null;
-  hourly: OpenMeteoForecastJSON["hourly"] | null;
-  daily: OpenMeteoForecastJSON["daily"] | null;
+type DailyBlock = {
+  time: string[];
+  weathercode?: number[];
+  temperature_2m_max?: number[];
+  temperature_2_ m_min?: number[]; // NOTE: we’ll normalize name below for safety
+  temperature_2m_min?: number[];
+  sunrise?: string[];
+  sunset?: string[];
+};
+
+type WeatherResponse = {
+  timezone?: string; // e.g., "Europe/Stockholm"
+  current_weather?: CurrentWeather;
+  hourly?: HourlyBlock;
+  daily?: DailyBlock;
+};
+
+type AirQualityHourly = {
+  time: string[];
+  european_aqi?: number[];
+  pm2_5?: number[];
+};
+
+type AirQualityResponse = {
+  hourly?: AirQualityHourly;
+};
+
+type Place = {
+  name: string;
+  country?: string;
+  admin1?: string;
+  latitude: number;
+  longitude: number;
+  timezone?: string; // normalized IANA TZ (never "auto")
+};
+
+type ApiPayload = {
+  place: Place;
+  timezone: string; // duplicate at root for convenience
+  current_weather: CurrentWeather | null;
+  hourly: HourlyBlock | null;
+  daily: DailyBlock | null;
   air_quality: {
     european_aqi: number[];
     pm2_5: number[];
@@ -70,9 +84,10 @@ type ForecastPayload = {
   };
 };
 
-/* ---------------------------------------
-   Small helper: timed fetch + retries
---------------------------------------- */
+/* =========================
+   Utilities
+========================= */
+
 async function fetchRetry(
   url: string,
   opts: RequestInit & { timeoutMs?: number } = {},
@@ -84,6 +99,7 @@ async function fetchRetry(
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const res = await fetch(url, {
         ...init,
@@ -93,14 +109,12 @@ async function fetchRetry(
           "user-agent": "weather-god/1.0",
           ...(init.headers || {}),
         },
-        // next: { revalidate: 0 } — not necessary with cache:"no-store"
       });
       clearTimeout(id);
+
       if (!res.ok) {
         if (res.status >= 500 && attempt < retries) {
-          await new Promise((r) =>
-            setTimeout(r, backoffMs * Math.pow(2, attempt))
-          );
+          await new Promise((r) => setTimeout(r, backoffMs * 2 ** attempt));
           continue;
         }
         throw new Error(`HTTP ${res.status}`);
@@ -109,21 +123,18 @@ async function fetchRetry(
     } catch (err) {
       clearTimeout(id);
       if (attempt < retries) {
-        await new Promise((r) =>
-          setTimeout(r, backoffMs * Math.pow(2, attempt))
-        );
+        await new Promise((r) => setTimeout(r, backoffMs * 2 ** attempt));
         continue;
       }
       throw err as Error;
     }
   }
+
+  // Should never hit
   throw new Error("fetchRetry exhausted");
 }
 
-/* ---------------------------------------
-   Utilities
---------------------------------------- */
-function pickFirstResult(results?: OpenMeteoGeocodeJSON["results"]): GeocodeResult | null {
+function pickFirstResult(results?: GeocodeResult[]): GeocodeResult | null {
   if (!results || results.length === 0) return null;
   const r = results[0];
   return {
@@ -136,133 +147,164 @@ function pickFirstResult(results?: OpenMeteoGeocodeJSON["results"]): GeocodeResu
   };
 }
 
-/* ---------------------------------------
-   GET
---------------------------------------- */
+function normalizeTimezone(tz?: string): string {
+  if (!tz || tz === "auto") return "UTC";
+  try {
+    // Throws if invalid
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return tz;
+  } catch {
+    return "UTC";
+  }
+}
+
+/* =========================
+   Handler
+========================= */
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-
-    // Inputs: either city OR explicit lat/lon
     const cityRaw = (searchParams.get("city") || "").trim();
     const latParam = searchParams.get("lat");
     const lonParam = searchParams.get("lon");
 
-    let place: GeocodeResult | null = null;
+    let place: Place | null = null;
 
-    if (latParam && lonParam && !Number.isNaN(+latParam) && !Number.isNaN(+lonParam)) {
-      // If coords provided, skip geocode
+    // A) Coordinates path (preferred when present)
+    if (
+      latParam !== null &&
+      lonParam !== null &&
+      !Number.isNaN(Number(latParam)) &&
+      !Number.isNaN(Number(lonParam))
+    ) {
       place = {
         name: cityRaw || "My location",
         latitude: Number(latParam),
         longitude: Number(lonParam),
-        country: undefined,
-        timezone: "auto",
+        timezone: undefined, // will resolve from weather response
       };
     } else {
-      const city = cityRaw || "Stockholm";
-
-      // Geocode the city
+      // B) City name → geocode
+      const name = cityRaw || "Stockholm";
       const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
-        city
+        name
       )}&count=1&language=en&format=json`;
-
       try {
         const geocodeRes = await fetchRetry(geocodeUrl, { timeoutMs: 10_000 });
-        const geocodeJson = (await geocodeRes.json()) as OpenMeteoGeocodeJSON;
-        place = pickFirstResult(geocodeJson.results);
+        const geo = (await geocodeRes.json()) as GeocodeSearchResponse;
+        const first = pickFirstResult(geo.results);
+        if (first) {
+          place = {
+            name: first.name,
+            country: first.country,
+            admin1: first.admin1,
+            latitude: first.latitude,
+            longitude: first.longitude,
+            timezone: first.timezone,
+          };
+        }
       } catch {
-        // swallow — we’ll fallback below
+        // fall through → set fallback below
       }
 
-      // Fallback if geocoding failed
       if (!place) {
         place = {
-          name: city,
+          name,
           latitude: 59.3293,
           longitude: 18.0686,
           country: "Sweden",
-          timezone: "auto",
+          timezone: undefined, // resolve later
         };
       }
     }
 
-    const lat = place.latitude;
-    const lon = place.longitude;
+    const { latitude: lat, longitude: lon } = place;
 
-    // Weather: ensure daily=weathercode is requested
+    // Weather (include daily=weathercode)
     const weatherUrl =
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation_probability,weathercode` +
-      `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weathercode` + // <-- added weathercode
+      `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weathercode` +
       `&current_weather=true&timezone=auto`;
 
     const weatherRes = await fetchRetry(weatherUrl, { timeoutMs: 12_000 });
-    const weatherJson = (await weatherRes.json()) as OpenMeteoForecastJSON;
+    const weather = (await weatherRes.json()) as WeatherResponse;
 
-    // Air Quality
+    // Resolve timezone: prefer API, then geocode, then UTC (never "auto")
+    const resolvedTZ = normalizeTimezone(
+      (weather.timezone && weather.timezone !== "auto" ? weather.timezone : undefined) ||
+        place.timezone
+    );
+    place.timezone = resolvedTZ;
+
+    // Air Quality (best effort)
     const aqiUrl =
       `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}` +
       `&hourly=european_aqi,pm2_5&timezone=auto`;
 
-    let air_quality: ForecastPayload["air_quality"] = {
-      european_aqi: [],
-      pm2_5: [],
-      time: [],
-      current: null,
-    };
-
+    let aqHourly: AirQualityHourly = { time: [], european_aqi: [], pm2_5: [] };
     try {
       const aqiRes = await fetchRetry(aqiUrl, { timeoutMs: 12_000 }, 2);
-      const aqiJson = (await aqiRes.json()) as OpenMeteoAQIJSON;
-
-      const times = aqiJson.hourly?.time ?? [];
-      const aqi = aqiJson.hourly?.european_aqi ?? [];
-      const pm25 = aqiJson.hourly?.pm2_5 ?? [];
-
-      // Align "current" AQI to current weather time if possible
-      let current: { european_aqi?: number; pm2_5?: number } | null = null;
-      const cwTime = weatherJson.current_weather?.time;
-      if (cwTime && times.length) {
-        const idx = times.indexOf(cwTime);
-        if (idx >= 0) {
-          current = {
-            european_aqi: aqi[idx],
-            pm2_5: pm25[idx],
-          };
-        }
-      }
-
-      air_quality = {
-        european_aqi: aqi,
-        pm2_5: pm25,
-        time: times,
-        current,
+      const aqiJson = (await aqiRes.json()) as AirQualityResponse;
+      aqHourly = {
+        time: aqiJson.hourly?.time ?? [],
+        european_aqi: aqiJson.hourly?.european_aqi ?? [],
+        pm2_5: aqiJson.hourly?.pm2_5 ?? [],
       };
     } catch {
       // keep defaults
     }
 
-    const payload: ForecastPayload = {
+    // Align aqi "current" with weather current time if possible
+    const cwTime = weather.current_weather?.time;
+    let aqiCurrent: { european_aqi?: number; pm2_5?: number } | null = null;
+    if (cwTime && aqHourly.time.length > 0) {
+      const idx = aqHourly.time.indexOf(cwTime);
+      if (idx >= 0) {
+        aqiCurrent = {
+          european_aqi: aqHourly.european_aqi?.[idx],
+          pm2_5: aqHourly.pm2_5?.[idx],
+        };
+      }
+    }
+
+    // Normalize daily naming edge (some typings/tools report `temperature_2_ m_min`)
+    if (weather.daily && !(weather.daily as DailyBlock).temperature_2m_min) {
+      const maybeWrong =
+        (weather.daily as unknown as { ["temperature_2_ m_min"]?: number[] })[
+          "temperature_2_ m_min"
+        ];
+      if (maybeWrong && Array.isArray(maybeWrong)) {
+        (weather.daily as DailyBlock).temperature_2m_min = maybeWrong;
+      }
+    }
+
+    const payload: ApiPayload = {
       place,
-      current_weather: weatherJson.current_weather ?? null,
-      hourly: weatherJson.hourly ?? null,
-      daily: weatherJson.daily ?? null,
-      air_quality,
+      timezone: resolvedTZ,
+      current_weather: weather.current_weather ?? null,
+      hourly: weather.hourly ?? null,
+      daily: weather.daily ?? null,
+      air_quality: {
+        european_aqi: aqHourly.european_aqi ?? [],
+        pm2_5: aqHourly.pm2_5 ?? [],
+        time: aqHourly.time ?? [],
+        current: aqiCurrent,
+      },
     };
 
-    return new NextResponse(JSON.stringify(payload), {
+    return NextResponse.json(payload, {
       status: 200,
       headers: {
-        "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store, max-age=0",
       },
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return new NextResponse(JSON.stringify({ error: "Forecast API failed", detail: msg }), {
-      status: 502,
-      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: "Forecast API failed", detail: message },
+      { status: 502 }
+    );
   }
 }
