@@ -38,7 +38,6 @@ type DailyBlock = {
   time: string[];
   weathercode?: number[];
   temperature_2m_max?: number[];
-  temperature_2_ m_min?: number[]; // NOTE: we’ll normalize name below for safety
   temperature_2m_min?: number[];
   sunrise?: string[];
   sunset?: string[];
@@ -130,7 +129,6 @@ async function fetchRetry(
     }
   }
 
-  // Should never hit
   throw new Error("fetchRetry exhausted");
 }
 
@@ -269,14 +267,13 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Normalize daily naming edge (some typings/tools report `temperature_2_ m_min`)
+    // Normalize daily naming edge from some tooling that may provide a mis-typed key
     if (weather.daily && !(weather.daily as DailyBlock).temperature_2m_min) {
-      const maybeWrong =
-        (weather.daily as unknown as { ["temperature_2_ m_min"]?: number[] })[
-          "temperature_2_ m_min"
-        ];
-      if (maybeWrong && Array.isArray(maybeWrong)) {
-        (weather.daily as DailyBlock).temperature_2m_min = maybeWrong;
+      const dailyUnknown = weather.daily as unknown as Record<string, unknown>;
+      const maybeWrong = dailyUnknown["temperature_2_ m_min"];
+      if (Array.isArray(maybeWrong)) {
+        (weather.daily as DailyBlock).temperature_2m_min =
+          maybeWrong as number[];
       }
     }
 
